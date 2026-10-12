@@ -331,8 +331,14 @@ target share them.
 
 ![pool](./docs/images/devops-async-pool.gif)
 
-`M-x devops-goto-session` pops to the session buffer
-`M-x devops-restart-session` kills all sessions for this target
+When they are all busy, running another block is an error.
+
+The sessions in a pool share nothing, so don't write blocks that rely on
+a `cd` or `export` from an earlier block. A block with its own
+`:session` header runs in that session, outside the pool.
+
+`M-x devops-goto-session` pops to a session of the heading's target, and
+`M-x devops-restart-session` kills all of them.
 
 Caveats:
 
