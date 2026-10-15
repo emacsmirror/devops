@@ -53,15 +53,16 @@
 ;;
 ;; Turn on `devops-mode' to run blocks on their targets.
 ;;
-;; Building on this syntax, `devops.el' supports
-;; - multiple targets
+;; `devops.el' supports
+;; - multiple targets per heading
 ;; - async execution with a session pool per target
+;;   when `devops-enable-session-async' is set
 ;; - tangling (uploading) files to remote servers
 ;; - drift detection (`devops-drift', in devops-drift.el)
 ;; - DWIM shell commands
-;; - a per-project Library of Babel: the named blocks of a project's
+;; - a per-project Library of Babel: named blocks of a project's
 ;;   tools.org are callable from every org file in the project
-;;   (`devops-lob-auto-load', in devops-lob.el)
+;;   (See `devops-lob-auto-load', in devops-lob.el)
 ;; - an execution log of block runs, for an agent to follow
 ;;   (`devops-execution-log', in devops-log.el)
 ;; - noninteractive functions for scripts over emacsclient
