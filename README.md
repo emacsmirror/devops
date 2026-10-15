@@ -5,7 +5,7 @@
 [![Emacs 30.1+](https://img.shields.io/badge/Emacs-30.1%2B-7F5AB6?logo=gnuemacs&logoColor=white)](https://www.gnu.org/software/emacs/)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
-By following some conventions, this package helps you to manage infrastructure with org mode. Infrastructure here may be servers, containers, serverless functions, DNS... up to you.
+`devops.el` helps you to manage infrastructure with org mode. Infrastructure here may be servers, containers, serverless functions, DNS... up to you.
 
 ## Installation
 
@@ -99,7 +99,7 @@ There are some shortcomings and annoyances, however:
 
 5. Tangling ignores `:dir`. If you are uploading a file and then running a server command next to it, now the server needs to go in two places. (`:dir` and `:tangle`)
 
-**Named locations**
+**A partial solution: named locations**
 
 The last two can be mitigated using elisp to name remote locations:
 
