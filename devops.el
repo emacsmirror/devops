@@ -62,7 +62,7 @@
 ;; - DWIM shell commands
 ;; - a per-project Library of Babel: named blocks of a project's
 ;;   tools.org are callable from every org file in the project
-;;   (See `devops-lob-auto-load', in devops-lob.el)
+;;   (`devops-lob-auto-load', in devops-lob.el)
 ;; - an execution log of block runs, for an agent to follow
 ;;   (`devops-execution-log', in devops-log.el)
 ;; - noninteractive functions for scripts over emacsclient
