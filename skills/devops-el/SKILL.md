@@ -239,6 +239,7 @@ A block run (`execute`: the block ran; `result`: an async result arrived) adds:
 | Key | Meaning |
 |---|---|
 | `line` | the block's `#+begin_src` line |
+| `heading`, `outline`, `heading-line` | the heading the block is under, the titles from the top level down to it, and its line. Absent before the first heading. Match on these rather than `line`, which edits make stale |
 | `session`, `status`, `id` | as `devops-scripting-block-output` answers them |
 | `error` | why there is no session: the block ran on no target |
 
@@ -247,7 +248,7 @@ A `tangle` or `drift` adds:
 | Key | Meaning |
 |---|---|
 | `all` | true when run with a prefix argument, on every target-tagged heading |
-| `heading`, `line` | the heading it ran on, unless `all` |
+| `heading`, `outline`, `line` | the heading it ran on, its outline path, and its line, unless `all` |
 | `targets` | `tangle`: one `{tag, target, files}` per target, `files` a count |
 | `files` | `drift`: one `{status, tag, path, remote, detail}` per tangled file |
 | `error` | why the command failed; then there are no `targets` or `files` |
@@ -266,7 +267,7 @@ that prints one short line per run:
 tail -n0 -F ~/.cache/devops/executions.jsonl \
   | jq --unbuffered -rc --arg dir "$PWD/" \
       'select((.file // "") | startswith($dir))
-       | "\(.event) \(if .error then "error" else .status // "" end) \(.file):\(.line // "all")"'
+       | "\(.event) \(if .error then "error" else .status // "" end) \(.file):\(.line // "all") \((.outline // []) | join(" > "))"'
 ```
 
 On a block line, call `devops-scripting-block-output` for that file and

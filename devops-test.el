@@ -2283,6 +2283,9 @@ fails, and the entry holds why."
         (should (= 1 (length entries)))
         (should (equal (alist-get 'event (car entries)) "execute"))
         (should (equal (alist-get 'line (car entries)) 3))
+        (should (equal (alist-get 'heading (car entries)) "Run"))
+        (should (equal (alist-get 'outline (car entries)) ["Run"]))
+        (should (equal (alist-get 'heading-line (car entries)) 1))
         (should (string-match-p
                  "\\`[0-9-]+T[0-9:]+\\.[0-9]\\{3\\}[-+][0-9]\\{4\\}\\'"
                  (alist-get 'time (car entries))))
@@ -2291,6 +2294,21 @@ fails, and the entry holds why."
 
 (defvar devops-test--target-runs 0
   "How many times the dynamic target's block in a test has run.")
+
+(ert-deftest devops-execution-log-outline-test ()
+  "A block's entry names its heading and the path of headings above it."
+  (devops-test--with-execution-log log
+    (devops-test--with-org
+        "* Servers\n** web1 :x:\n*** TODO nginx\n#+begin_src emacs-lisp\n1\n#+end_src\n"
+      (goto-char (point-min))
+      (re-search-forward "begin_src")
+      (let ((org-confirm-babel-evaluate nil))
+        (org-babel-execute-src-block))
+      (let ((entry (car (devops-test--log-entries log))))
+        (should (equal (alist-get 'heading entry) "nginx"))
+        (should (equal (alist-get 'outline entry) ["Servers" "web1" "nginx"]))
+        (should (equal (alist-get 'heading-line entry) 3))
+        (should (equal (alist-get 'line entry) 4))))))
 
 (ert-deftest devops-execution-log-dynamic-target-test ()
   "Logging a run under a dynamic target does not run its block again.
@@ -2405,6 +2423,7 @@ The blocks it runs for noweb are not logged."
             (should (equal (alist-get 'event entry) "tangle"))
             (should (eq (alist-get 'all entry) :false))
             (should (equal (alist-get 'heading entry) "Deploy"))
+            (should (equal (alist-get 'outline entry) ["Deploy"]))
             (should (equal (alist-get 'line entry) 3))
             (should (equal (alist-get 'targets entry)
                            `[((tag . "local") (target . ,target)

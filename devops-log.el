@@ -26,6 +26,10 @@
 ;; an agent what the user did -- ran a block, got an async result,
 ;; tangled, checked drift -- by appending a JSON line per event.
 ;;
+;; Each line says where: a block's line, plus the heading it is under
+;; and that heading's outline path, so an agent can tell what just ran
+;; without relying on a line number that edits make stale.
+;;
 ;; A line is a notification, not a record: it says what happened and
 ;; where, and carries no output, #+RESULTS or diff.  The agent reads
 ;; those with `devops-scripting-block-output' or the drift functions.
@@ -55,7 +59,7 @@ The log's directory is created on the first write."
 
 (defun devops-log--block-entry (event pos session)
   "Return the log entry for EVENT on the src block at POS, an alist.
-The block's line, and its session, status and id as
+The block's line, the heading it is under, and its session, status and id as
 `devops-scripting-block-output' answers them for SESSION, the name of
 the session it ran in.  The target is not resolved again: for a dynamic
 target that would run its block.  A block that ran on no target, SESSION
@@ -63,6 +67,7 @@ nil, is logged with an error."
   (let ((line (line-number-at-pos pos)))
     `(,@(devops-log--header event)
       (:line . ,line)
+      ,@(save-excursion (goto-char pos) (devops-log--heading))
       ,@(condition-case err
             (let ((answer (save-excursion
                             (devops-scripting--block-output
@@ -81,12 +86,14 @@ target."
   (devops-log-append (devops-log--block-entry event pos session)))
 
 (defun devops-log--heading ()
-  "Return the heading at point as (:heading . TITLE) and (:line . N).
-Nil before the first heading."
+  "Return the heading at point as an alist, or nil before the first heading.
+:heading is its title, :outline the titles from the top level down to
+it, and :heading-line its line."
   (save-excursion
     (when (ignore-errors (org-back-to-heading t) t)
       `((:heading . ,(org-get-heading t t t t))
-        (:line . ,(line-number-at-pos))))))
+        (:outline . ,(vconcat (org-get-outline-path t)))
+        (:heading-line . ,(line-number-at-pos))))))
 
 ;;;###autoload
 (defun devops-log-command (event all fields)
@@ -97,7 +104,11 @@ the command's results, or its error."
   (devops-log-append
    `(,@(devops-log--header event)
      (:all . ,(if all t :json-false))
-     ,@(unless all (devops-log--heading))
+     ,@(unless all
+         (let ((heading (devops-log--heading)))
+           `(,@(assq-delete-all :heading-line (copy-sequence heading))
+             ,@(when heading
+                 `((:line . ,(alist-get :heading-line heading)))))))
      ,@fields)))
 
 (provide 'devops-log)
