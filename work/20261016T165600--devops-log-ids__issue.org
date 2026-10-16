@@ -1,7 +1,203 @@
-#+TITLE: Devops IDs
+#+TITLE: Block IDs
+#+PROPERTY: header-args:sh :results output
+#+TARGET: .. (local)
 
 * Issue
 
+The =result= line of an async run can carry the wrong run ID: the first
+UUID that appears in the block's *output*, not the ID of the run.
+
+** What was seen
+
+From devops.bb's sandbox work. The =execute= line has the right ID; the
+=result= line for the same run has another:
+
+| time     | event   | line | id in the log | run that ID names               |
+|----------+---------+------+---------------+---------------------------------|
+| 10:49:16 | execute |  262 | =3b71952d…=   | the =tail -n 2 \| jq= block (ok)|
+| 10:49:19 | result  |  262 | =6628f1b2…=   | an earlier =jq select(…)= block |
+| 10:50:36 | execute |  275 | =d75b29c1…=   | the =tail -n 4 \| jq= block (ok)|
+| 10:50:36 | result  |  275 | =6628f1b2…=   | the same earlier block          |
+
+Checked with =devops-bb run-output= on each ID: =6628f1b2…= has the
+input of a block that ran minutes before. In the whole log, that ID is
+on four =result= lines and no other result ID repeats.
+
+** Why
+
+Both blocks printed the log, and the log holds =6628f1b2…= (its own
+=result= line from earlier). So the block's output *contains a UUID*.
+
+=devops--log-async-result= (devops.el) logs the result after
+=org-babel-insert-result= has replaced the placeholder with the output.
+=devops-log--block-entry= then asks =devops-scripting--block-output= for
+the block's =:id=, which calls =devops-scripting--block-run=
+(devops-scripting.el:190). That function reads the ID like this:
+
+: (string-match devops-scripting--uuid-regexp result)
+
+The regexp is *unanchored*. It is meant to find the placeholder that
+=#+RESULTS= holds while the run is going, but once the output is in
+=#+RESULTS=, it finds the first UUID anywhere in it. That ID then matches
+a run in the session, an old one, and the log line gets that run.
+
+The same unanchored match is in =devops-scripting-block-output=
+(devops-scripting.el:290), where it chooses between the pool's sessions.
+So =devops-bb output FILE LINE= can answer with the wrong run too, for a
+block whose output holds a UUID. Log, ID and session names are common
+in devops output, so this is not rare.
+
+The code already has the right test: =devops-scripting--placeholder-p=
+(line 228) anchors the UUID with =\`...\'= after =string-trim=.
+
+** Effect
+
+- A consumer that pairs =execute= and =result= by ID, and reads output
+  with =run-output ID= (devops.bb's =follow=, the dashboard and the
+  planned =export=), gets the wrong run's output, silently.
+- A =result= line can name a run that is not the one that finished, so
+  the dashboard shows one run done and another never done.
+- Only blocks whose output contains a UUID are hit, so a test with
+  =echo hi= passes.
+
 * Suggested fix
 
-* Steps
+One helper in devops-scripting.el, used at both places:
+
+#+begin_src emacs-lisp :eval no
+(defun devops-scripting--placeholder-id (result)
+  "Return the run ID RESULT is the placeholder for, else nil.
+Only a RESULT that is nothing but the UUID counts: output that mentions
+a UUID is output."
+  (and (devops-scripting--placeholder-p result)
+       (string-trim result)))
+#+end_src
+
+- =devops-scripting--block-run=: =id= becomes =(devops-scripting--placeholder-id result)=.
+- =devops-scripting-block-output=: same for its =id=.
+
+Then a finished block has no =id= from =#+RESULTS=, and
+=devops-scripting--block-run= falls back to the latest run that sent the
+block's body (its second branch). That is the existing rule for a
+finished block; it was just never reached when the output held a UUID.
+
+Better, and cheaper, for the log: the async filter *knows* the ID it is
+delivering. Where a result is logged (=devops--log-async-result=), pass
+that ID to =devops-log-block= and use it instead of looking the run up
+again from the buffer. Then the =result= line cannot disagree with the
+=execute= line, whatever the output says. The helper above stays, for
+=devops-scripting-block-output=, which has no ID to start from.
+
+Question: can =devops--during-async-filter= get the ID cheaply from
+ob-comint's filter? If not, the helper alone is enough.
+
+* TODO Steps
+
+Run by the operator on the host, in the devops.el checkout, with
+=devops-mode= on and the log set.
+
+** DONE 1. Reproduce                                                 :local:
+
+The block prints a fixed UUID, as the log would. Run it, then compare
+the IDs on its =execute= and =result= lines. Expected: equal. Seen:
+the =result= line has =00000000-0000-4000-8000-000000000000=.
+
+#+begin_src sh
+echo 00000000-0000-4000-8000-000000000000
+#+end_src
+
+#+RESULTS:
+: 00000000-0000-4000-8000-000000000000
+
+#+begin_src sh
+tail -n 2 ~/.cache/devops/executions.jsonl | jq -M -c '{event,status,line,id}'
+#+end_src
+
+#+RESULTS:
+: {"event":"result","status":"done","line":105,"id":"38b1221e-5b53-424f-825b-e23d7a2e7c72"}
+: {"event":"execute","status":"running","line":112,"id":"b3c61860-fb5a-4187-b78d-03afb6b7299b"}
+
+** DONE 2. Control: same block, no UUID in the output                :local:
+
+Expect the two IDs to be equal.
+
+#+begin_src sh
+echo hello
+#+end_src
+
+#+RESULTS:
+: hello
+
+#+begin_src sh
+tail -n 2 ~/.cache/devops/executions.jsonl | jq -M -c '{event,status,line,id}'
+#+end_src
+
+#+RESULTS:
+: {"event":"execute","status":"running","line":124,"id":"010ba502-b66f-450d-a942-573d81bc64cd"}
+: {"event":"result","status":"done","line":124,"id":"010ba502-b66f-450d-a942-573d81bc64cd"}
+
+Step 1 note: the =echo 0000…= block itself was logged right, because
+that UUID is in no session. The bug showed on the next block, the =tail=
+that printed the log: its =result= (line 112) carries =38b1221e…=, the
+ID of the previous run, which its output printed.
+
+** DONE 3. Failing tests first
+
+Both failed before the fix (=block-run= returned run A for run B's
+block, and the =result= lines carried the first run's ID):
+
+- =devops-scripting--block-run-output-uuid-test=
+- =devops-execution-log-async-output-uuid-test=: the second block prints
+  the first run's ID; the log must read =first first second second=.
+
+** DONE 4. Fix
+
+- devops-scripting.el: =devops-scripting--placeholder-id=, used by
+  =devops-scripting--block-run= and =devops-scripting-block-output=. A
+  UUID is a run's ID only when it is all of #+RESULTS.
+- devops.el: =devops--log-async-result= reads the ID from the
+  placeholder *before* =org-babel-insert-result= replaces it, and passes
+  it to =devops--log=. This also covers a block re-run while its first
+  run is going, where "latest run that sent the body" would pick the
+  wrong one.
+- devops-log.el: =devops-log-block= and =devops-log--block-entry= take
+  an optional =id=, which replaces the looked-up one.
+
+=make test=: 165/165. =make compile= clean (warnings are errors).
+
+** TODO 4b. Verify in the running Emacs                             :local:
+
+Emacs still has the old code. Load the fixed files, then repeat the
+failing case: two blocks, the second printing the first's ID.
+
+#+begin_src emacs-lisp :eval no
+(dolist (f '("devops-scripting" "devops-log" "devops"))
+  (load-file (expand-file-name (concat f ".el") (file-name-directory (locate-library "devops")))))
+#+end_src
+
+Run these two blocks in order, then the check below. Expect =execute= and
+=result= IDs to match for both.
+
+#+begin_src sh
+echo first
+#+end_src
+
+#+RESULTS:
+: first
+
+#+begin_src sh
+tail -n 1 ~/.cache/devops/executions.jsonl | jq -M -r .id | xargs -I{} echo printing {}
+#+end_src
+
+#+RESULTS:
+: printing 1e5c4ba4-9aea-4f34-988b-8f4a7f63a616
+
+#+begin_src sh
+tail -n 4 ~/.cache/devops/executions.jsonl | jq -M -c '{event,line,id}'
+#+end_src
+
+#+RESULTS:
+: {"event":"execute","line":181,"id":"1e5c4ba4-9aea-4f34-988b-8f4a7f63a616"}
+: {"event":"result","line":181,"id":"1e5c4ba4-9aea-4f34-988b-8f4a7f63a616"}
+: {"event":"execute","line":188,"id":"d211634b-33f5-4c1b-a640-15ad13fc0b85"}
+: {"event":"result","line":188,"id":"d211634b-33f5-4c1b-a640-15ad13fc0b85"}

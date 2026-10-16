@@ -2065,6 +2065,19 @@ the buffer-local marker regexp -- without a shell behind it."
                      devops-test--run-b))
       (should-not (devops-scripting--block-run runs nil "echo three")))))
 
+(ert-deftest devops-scripting--block-run-output-uuid-test ()
+  "A UUID inside a finished block's output is output, not a run's ID."
+  (devops-test--with-transcript "devops-test-session" (devops-test--transcript)
+    (let ((runs (devops-scripting--runs (get-buffer "devops-test-session")))
+          (printed (format "ran %s earlier" devops-test--run-a)))
+      (should (equal (alist-get :id (devops-scripting--block-run
+                                     runs printed "echo two"))
+                     devops-test--run-b))
+      (should (equal (alist-get :id (devops-scripting--block-run
+                                     runs (concat devops-test--run-a "\n")
+                                     "echo two"))
+                     devops-test--run-a)))))
+
 (ert-deftest devops-scripting-block-output-test ()
   "The output of the block at a line, from the heading's session."
   (devops-test--with-transcript "devops:/srv/app/" (devops-test--transcript)
@@ -2379,6 +2392,43 @@ The entry names the session from the target the run resolved."
                     (should (equal (alist-get 'line (cadr entries)) 5))
                     (should (equal (alist-get 'status (cadr entries)) "done"))
                     (should-not (assq 'output (cadr entries)))))))
+          (when-let* ((buf (get-buffer session)))
+            (let ((kill-buffer-query-functions nil))
+              (kill-buffer buf))))))))
+
+(ert-deftest devops-execution-log-async-output-uuid-test ()
+  "A result is logged with its own run's ID, whatever its output prints.
+The second block prints the first run's ID, which is in the session."
+  (let ((devops-enable-session-async t))
+    (devops-test--with-local-target target
+      (let ((session (devops--session-name target)))
+        (unwind-protect
+            (devops-test--with-execution-log log
+              (devops-test--with-org
+                  (format (concat "#+TARGET: %s (local)\n\n"
+                                  "* Run\t\t:local:\n\n"
+                                  "#+begin_src sh\necho hi\n#+end_src\n")
+                          target)
+                (let ((org-confirm-babel-evaluate nil)
+                      (wait (lambda (n)
+                              (let ((deadline (+ (float-time) 30)))
+                                (while (and (< (float-time) deadline)
+                                            (< (length (devops-test--log-entries log))
+                                               n))
+                                  (accept-process-output nil 0.2))))))
+                  (goto-char (point-min))
+                  (re-search-forward "begin_src")
+                  (let ((first (org-babel-execute-src-block)))
+                    (funcall wait 2)
+                    (goto-char (point-max))
+                    (insert (format "\n#+begin_src sh\necho %s\n#+end_src\n" first))
+                    (re-search-backward "begin_src")
+                    (let ((second (org-babel-execute-src-block)))
+                      (funcall wait 4)
+                      (let ((entries (devops-test--log-entries log)))
+                        (should (equal (mapcar (lambda (e) (alist-get 'id e))
+                                               entries)
+                                       (list first first second second)))))))))
           (when-let* ((buf (get-buffer session)))
             (let ((kill-buffer-query-functions nil))
               (kill-buffer buf))))))))
