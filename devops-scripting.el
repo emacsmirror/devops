@@ -192,9 +192,7 @@ their expansion."
 The run whose ID is still in RESULT, else the latest that sent BODY: once
 a block finishes its ID gives way to the output in #+RESULTS, and the
 body is what is left to know it by."
-  (let ((id (and result
-                 (string-match devops-scripting--uuid-regexp result)
-                 (match-string 0 result))))
+  (let ((id (devops-scripting--placeholder-id result)))
     (or (and id (seq-find (lambda (run) (equal id (alist-get :id run))) runs))
         (car (last (seq-filter
                     (lambda (run) (devops-scripting--sent-p
@@ -230,6 +228,13 @@ list -- data for a block's :var, but noise to a reader."
   (and result
        (string-match-p (concat "\\`" devops-scripting--uuid-regexp "\\'")
                        (string-trim result))))
+
+(defun devops-scripting--placeholder-id (result)
+  "Return the run ID RESULT is the placeholder for, or nil.
+Only a RESULT that is nothing but the UUID counts: output that mentions
+a UUID, the ID of another run say, is output."
+  (and (devops-scripting--placeholder-p result)
+       (string-trim result)))
 
 ;;; Blocks
 
@@ -286,9 +291,7 @@ a dynamic target is resolved, and that runs its block; see
                                 (devops-scripting--block-output el name))
                               names))
              (result (devops-scripting--results-text))
-             (id (and result
-                      (string-match devops-scripting--uuid-regexp result)
-                      (match-string 0 result))))
+             (id (devops-scripting--placeholder-id result)))
         (or (and id (seq-find (lambda (answer)
                                 (equal id (alist-get :id answer)))
                               answers))

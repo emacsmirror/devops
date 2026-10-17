@@ -484,14 +484,16 @@ Does nothing unless `devops-lob-auto-load' is set."
   (when devops-lob-auto-load
     (devops--lob-maybe-load-on-find-file)))
 
-(defun devops--log (event pos session)
+(defun devops--log (event pos session &optional id)
   "Log EVENT on the src block at POS, run in SESSION, to the log.
 SESSION is the session buffer's name, or nil for a block that ran on
-no target.  Scripted evaluation -- a reference, a dynamic target,
-tangling -- runs blocks under `devops-with-sync', and those runs are not
-the user's, so they are not logged."
+no target.  ID, when known, is the run's ID, and is logged as it is
+instead of being looked up from the block.  Scripted evaluation -- a
+reference, a dynamic target, tangling -- runs blocks under
+`devops-with-sync', and those runs are not the user's, so they are not
+logged."
   (when (and devops-execution-log (not devops--inhibit-async))
-    (devops-log-block event pos session)))
+    (devops-log-block event pos session id)))
 
 (defvar devops-mode)
 
@@ -534,12 +536,30 @@ ob-comint runs no hook when an async result arrives; it calls
 
 (defun devops--log-async-result (fn &rest args)
   "Run FN, `org-babel-insert-result', with ARGS; log an async result.
-Point is on the block before FN runs, which may move it."
-  (let ((pos (point)))
+Point is on the block before FN runs, which may move it.  The block's
+#+RESULTS still holds the run's ID then, and the output that replaces
+it may print the ID of any other run, so the ID is read before FN."
+  (let* ((pos (point))
+         (session devops--async-result)
+         (id (and session devops-execution-log
+                  (devops--placeholder-id-at pos))))
     (prog1 (apply fn args)
-      (when-let* ((session devops--async-result))
+      (when session
         (let ((devops--async-result nil))
-          (devops--log "result" pos session))))))
+          (devops--log "result" pos session id))))))
+
+(declare-function devops-scripting--src-block-at "devops-scripting")
+(declare-function devops-scripting--results-text "devops-scripting")
+(declare-function devops-scripting--placeholder-id "devops-scripting")
+
+(defun devops--placeholder-id-at (pos)
+  "Return the run ID in #+RESULTS of the src block at POS, or nil.
+Nil when the result is no longer the placeholder, or POS is no block."
+  (require 'devops-scripting)
+  (ignore-errors
+    (save-excursion
+      (devops-scripting--src-block-at (line-number-at-pos pos))
+      (devops-scripting--placeholder-id (devops-scripting--results-text)))))
 
 ;;;###autoload
 (define-minor-mode devops-mode
