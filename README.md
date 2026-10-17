@@ -33,10 +33,11 @@ Enable optional features:
   :ensure t
   :custom
   (devops-enable-session-async t)    ; async sessions (recommended), see below
-  (devops-lob-auto-load t)           ; load a project's tools.org
   (devops-execution-log              ; log runs, tangles, drift checks
    "~/.cache/devops/executions.jsonl")
-  :config (devops-mode 1))
+  :config
+  (devops-mode 1)
+  (devops-lob-mode 1))                ; load a project's tools.org
 ```
 
 ## Why?
@@ -360,10 +361,10 @@ shell. The source block content is copied to the clipboard, so you can do
 
 Any project with a `tools.org` at its root can expose named org-babel blocks as reusable tools. `devops-lob` loads and unloads these per-project.
 
-Set `devops-lob-auto-load`, and while `devops-mode` is on, opening any file in a project that has `tools.org` loads its named blocks into the org-babel Library of Babel.
+Turn on `devops-lob-mode`, and opening any file in a project that has `tools.org` loads its named blocks into the org-babel Library of Babel. It works without `devops-mode`; with `devops-mode` on, a `#+call:` under a tagged heading runs on that heading's target.
 
 ```elisp
-(setq devops-lob-auto-load t)
+(devops-lob-mode 1)
 ```
 
 ### tools.org commands
@@ -374,6 +375,7 @@ Set `devops-lob-auto-load`, and while `devops-mode` is on, opening any file in a
 | `devops-lob-unload-project-tools` | Remove current project's tools from LOB           |
 | `devops-lob-reload-project-tools` | Unload then reload (pick up edits to `tools.org`) |
 | `devops-lob-unload-all`           | Remove all devops-tracked LOB entries             |
+| `devops-lob-tool-blocks`          | List loaded entries (name, language, `:var`s)     |
 
 ## Scripting and Agents
 

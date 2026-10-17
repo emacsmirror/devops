@@ -125,7 +125,7 @@ grep -c nginx
   it when the host is an input, not a constant.
 - **Tools.** A project's `tools.org` can expose named blocks as tools
   for `#+call: name(arg="x")`. List the loaded ones with
-  `(devops-org-tool-blocks)` (optional REGEXP) before writing your own.
+  `(devops-lob-tool-blocks)` (optional REGEXP) before writing your own.
 
 Org's built-in header arguments mean what org's manual says. devops.el
 adds only `:target`.
