@@ -46,7 +46,6 @@ The directory is removed afterwards."
                                      'org-babel-execute-src-block))
         (should-not (advice-member-p #'devops--resolve-ref-sync
                                      'org-babel-ref-resolve))
-        (should-not (memq #'devops--maybe-load-lob find-file-hook))
         (should-not (memq #'devops--log-execution org-babel-after-execute-hook))
         (should-not (advice-member-p #'devops--log-async-result
                                      'org-babel-insert-result))
@@ -55,7 +54,6 @@ The directory is removed afterwards."
                                  'org-babel-execute-src-block))
         (should (advice-member-p #'devops--resolve-ref-sync
                                  'org-babel-ref-resolve))
-        (should (memq #'devops--maybe-load-lob find-file-hook))
         (should (memq #'devops--log-execution org-babel-after-execute-hook))
         (should (advice-member-p #'devops--log-async-result
                                  'org-babel-insert-result)))
@@ -2589,12 +2587,12 @@ isolated so tests never touch real state.  Everything is removed after."
     (should (null org-babel-library-of-babel))
     (should (null devops--lob-project-registry))))
 
-(ert-deftest devops-org-tool-blocks-test ()
+(ert-deftest devops-lob-tool-blocks-test ()
   "Summarize and filter loaded LOB entries (README inspect example)."
   (devops-test--with-project root devops-test--tools-org
     (devops-lob-load-project-tools)
-    (should (= 2 (length (devops-org-tool-blocks))))
-    (let ((filtered (devops-org-tool-blocks "deploy")))
+    (should (= 2 (length (devops-lob-tool-blocks))))
+    (let ((filtered (devops-lob-tool-blocks "deploy")))
       (should (= 1 (length filtered)))
       (let ((entry (car filtered)))
         (should (eq (nth 0 entry) 'deploy))
@@ -2602,22 +2600,23 @@ isolated so tests never touch real state.  Everything is removed after."
         (should (eq (caar (nth 2 entry)) :var))))))
 
 (ert-deftest devops-lob-auto-load-on-find-file-test ()
-  "With `devops-lob-auto-load' set, opening a file in a project loads
-its tools.org; with it nil, nothing loads."
+  "With `devops-lob-mode' on, opening a file in a project loads its
+tools.org; with it off, nothing loads."
   (devops-test--with-project root devops-test--tools-org
     (let ((file (expand-file-name "notes.txt" root))
           buf)
       (with-temp-file file (insert "hi\n"))
       (unwind-protect
           (progn
-            (let ((devops-lob-auto-load nil))
-              (setq buf (find-file-noselect file))
-              (should-not devops--lob-project-registry))
+            (devops-lob-mode -1)
+            (setq buf (find-file-noselect file))
+            (should-not devops--lob-project-registry)
             (kill-buffer buf)
-            (let ((devops-lob-auto-load t))
-              (setq buf (find-file-noselect file))
-              (should (assq 'deploy org-babel-library-of-babel))
-              (should (= 1 (length devops--lob-project-registry)))))
+            (devops-lob-mode 1)
+            (setq buf (find-file-noselect file))
+            (should (assq 'deploy org-babel-library-of-babel))
+            (should (= 1 (length devops--lob-project-registry))))
+        (devops-lob-mode -1)
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
 (provide 'devops-test)

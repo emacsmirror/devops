@@ -25,48 +25,50 @@
 
 ;;; Commentary:
 ;;
-;; `devops.el' adds TARGET syntax for running org-babel commands
-;; on remote servers.
+;; Run org-babel blocks on remote machines, chosen by heading tag.
 ;;
-;; Example:
+;; A `#+TARGET' keyword maps a tag to a TRAMP prefix (or a local
+;; directory).  With `devops-mode' on, a block under a heading with that
+;; tag runs there, and `devops-tangle' writes its files there:
 ;;
-;; #+TARGET: /ssh:example1.com: (server1)
-;; #+TARGET: /ssh:example2.com: (server2)
+;;   #+TARGET: /ssh:web1.example.com: (web)
+;;   #+TARGET: /ssh:db1.example.com: (db)
 ;;
-;; * Do something on server1               :server1:
+;;   * Check the web server                  :web:
+;;   #+begin_src sh
+;;   hostname
+;;   #+end_src
+;;
+;;   #+RESULTS:
+;;   : web1
+;;
+;; Setup:
+;;
+;;   (devops-mode 1)
+;;
+;; Commands, on the heading at point:
+;;
+;; - `devops-tangle'             tangle the heading's blocks to its target
+;; - `devops-visit-file'         open tangled source block in the target
+;; - `devops-open-terminal-dwim' open a terminal at the target
 ;; 
-;; #+BEGIN_SRC sh
-;; hostname
-;; #+END_SRC
+;; If async is enabled (recommended)
+;; - `devops-goto-session'       show the target's shell session
+;; - `devops-restart-session'    kill the target's sessions
 ;;
-;; #+RESULTS:
-;; : example1.com
-;; 
-;; * Do something on server2               :server2:
-;; 
-;; #+BEGIN_SRC sh
-;; hostname
-;; #+END_SRC
+;; Options:
 ;;
-;; #+RESULTS:
-;; : example2.com
+;; - `devops-enable-session-async'  run blocks in async session pool
+;; - `devops-execution-log'         log each block run to a JSON file
 ;;
-;; Turn on `devops-mode' to run blocks on their targets.
+;; The other files are separate features, each loaded on first use:
 ;;
-;; `devops.el' supports
-;; - multiple targets per heading
-;; - async execution with a session pool per target
-;;   when `devops-enable-session-async' is set
-;; - tangling (uploading) files to remote servers
-;; - drift detection (`devops-drift', in devops-drift.el)
-;; - DWIM shell commands
-;; - a per-project Library of Babel: named blocks of a project's
-;;   tools.org are callable from every org file in the project
-;;   (`devops-lob-auto-load', in devops-lob.el)
-;; - an execution log of block runs, for an agent to follow
-;;   (`devops-execution-log', in devops-log.el)
-;; - noninteractive functions for scripts over emacsclient
-;;   (devops-scripting.el)
+;; - devops-drift.el      `devops-drift' compares tangled files with
+;;                        what is on each target
+;; - devops-lob.el        `devops-lob-mode' makes a project's tools.org
+;;                        callable from its org files
+;; - devops-scripting.el  functions for scripts over emacsclient
+;; - devops-log.el        writes `devops-execution-log'
 
 ;;; Code:
 
@@ -447,19 +449,11 @@ the run, with the session it gets bound to `devops--block-session'."
     (apply fn args)))
 
 
-;;; Optional features
+;;; Execution log
 ;;
-;; `devops-mode' installs the hooks for these always; each checks its
-;; variable when it runs, so setting one takes effect with the mode
-;; already on, and the file behind it loads only once it is used.
-
-(defcustom devops-lob-auto-load nil
-  "When non-nil, opening a file in a project loads its tools.org.
-The named src blocks of tools.org at the project root go into the
-Library of Babel; see `devops-lob-load-project-tools'.  Remote files
-are skipped.  Takes effect while `devops-mode' is on."
-  :type 'boolean
-  :group 'devops)
+;; `devops-mode' always installs the logging hooks.  They check
+;; `devops-execution-log' each time they run, so setting it takes effect
+;; with the mode already on, and devops-log.el loads only once it is set.
 
 (defcustom devops-execution-log nil
   "File to append a JSON line to per user action, or nil for none.
@@ -474,15 +468,8 @@ is on."
   :type '(choice (const :tag "Off" nil) file)
   :group 'devops)
 
-(autoload 'devops--lob-maybe-load-on-find-file "devops-lob")
 (autoload 'devops-log-block "devops-log")
 (autoload 'devops-log-command "devops-log")
-
-(defun devops--maybe-load-lob ()
-  "Load the project's tools.org, for `find-file-hook'.
-Does nothing unless `devops-lob-auto-load' is set."
-  (when devops-lob-auto-load
-    (devops--lob-maybe-load-on-find-file)))
 
 (defun devops--log (event pos session &optional id)
   "Log EVENT on the src block at POS, run in SESSION, to the log.
@@ -564,7 +551,7 @@ Nil when the result is no longer the placeholder, or POS is no block."
 ;;;###autoload
 (define-minor-mode devops-mode
   "Make org-babel blocks run on their heading's #+TARGET.
-Also does what `devops-lob-auto-load' and `devops-execution-log' ask."
+Also writes `devops-execution-log' when that is set."
   :global t
   :group 'devops
   (if devops-mode
@@ -573,7 +560,6 @@ Also does what `devops-lob-auto-load' and `devops-execution-log' ask."
                     #'devops--execute-on-target)
         (advice-add 'org-babel-ref-resolve :around
                     #'devops--resolve-ref-sync)
-        (add-hook 'find-file-hook #'devops--maybe-load-lob)
         (add-hook 'org-babel-after-execute-hook #'devops--log-execution)
         (advice-add 'org-babel-comint-async-filter :around
                     #'devops--during-async-filter)
@@ -581,7 +567,6 @@ Also does what `devops-lob-auto-load' and `devops-execution-log' ask."
                     #'devops--log-async-result))
     (advice-remove 'org-babel-execute-src-block #'devops--execute-on-target)
     (advice-remove 'org-babel-ref-resolve #'devops--resolve-ref-sync)
-    (remove-hook 'find-file-hook #'devops--maybe-load-lob)
     (remove-hook 'org-babel-after-execute-hook #'devops--log-execution)
     (advice-remove 'org-babel-comint-async-filter
                    #'devops--during-async-filter)
@@ -913,23 +898,6 @@ ARG, visit it in another window."
           (find-file chosen-file))))
      (t
       (message "No tangle paths found.")))))
-
-(defun devops-org-tool-blocks (&optional regexp)
-  "Return a summary of org-babel library of babel entries.
-Filter by REGEXP if provided."
-  (mapcar (lambda (entry)
-            (let* ((name (car entry))
-                   (info (cdr entry))
-                   (lang (nth 0 info))
-                   (params (nth 2 info))
-                   (filtered (seq-filter (lambda (p)
-                                           (memq (car p) '(:var)))
-                                         params)))
-              (list name lang filtered)))
-          (seq-filter (lambda (entry)
-                        (or (null regexp)
-                            (string-match-p regexp (symbol-name (car entry)))))
-                      org-babel-library-of-babel)))
 
 (defun devops--ghostty-command (dir &optional env-vars)
   "Return a ghostty command line opening a shell in DIR.

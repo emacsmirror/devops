@@ -21,9 +21,24 @@
 
 ;;; Commentary:
 ;;
-;; Load a project's `tools.org' into the Library of Babel, so its named
-;; src blocks are callable from any org file in that project, and unload
-;; them again when the project is left.
+;; A project's `tools.org' holds named src blocks that every org file in
+;; the project can call:
+;;
+;;   #+call: deploy(env="prod")
+;;
+;; Turn on `devops-lob-mode' and opening any local file in a project
+;; with a tools.org at its root loads those blocks into the Library of
+;; Babel.  Or load them by hand:
+;;
+;; - `devops-lob-load-project-tools'    load the current project's tools.org
+;; - `devops-lob-unload-project-tools'  remove them again
+;; - `devops-lob-reload-project-tools'  pick up edits to tools.org
+;; - `devops-lob-unload-all'            remove every project's tools
+;;
+;; `devops-lob-tool-blocks' lists what is loaded.
+;;
+;; This file doesn't need `devops-mode'.  With it on, a `#+call:' under a
+;; tagged heading runs on that heading's target like any other block.
 
 ;;; Code:
 
@@ -44,7 +59,7 @@
 (defvar devops--lob-loading nil
   "Non-nil while a tools.org load is in progress.
 Reading tools.org visits it, which fires `find-file-hook' before the
-project is registered; without this guard `devops-lob-auto-load' would
+project is registered; without this guard `devops-lob-mode' would
 re-enter the load and register the project twice.")
 
 (defun devops--lob-do-load (root tools-file)
@@ -106,7 +121,7 @@ re-enter the load and register the project twice.")
 
 (defun devops--lob-maybe-load-on-find-file ()
   "Load tools.org for the current project if not yet loaded.
-Called from `find-file-hook' when `devops-lob-auto-load' is set.
+Called from `find-file-hook' while `devops-lob-mode' is on.
 Skips TRAMP remote paths."
   (when (and (not devops--lob-loading)
              (not (file-remote-p default-directory)))
@@ -116,6 +131,37 @@ Skips TRAMP remote paths."
       (when (and (file-readable-p file)
                  (not (assoc root devops--lob-project-registry)))
         (devops--lob-do-load root file)))))
+
+;;;###autoload
+(define-minor-mode devops-lob-mode
+  "Load a project's tools.org into the Library of Babel on opening a file.
+The named src blocks of tools.org at the project root become callable
+from any org file in the project; see `devops-lob-load-project-tools'.
+Remote files are skipped."
+  :global t
+  :group 'devops
+  (if devops-lob-mode
+      (add-hook 'find-file-hook #'devops--lob-maybe-load-on-find-file)
+    (remove-hook 'find-file-hook #'devops--lob-maybe-load-on-find-file)))
+
+;;;###autoload
+(defun devops-lob-tool-blocks (&optional regexp)
+  "Return (NAME LANG VARS) for each Library of Babel entry.
+VARS are the entry's `:var' header arguments.  With REGEXP, return only
+the entries whose name matches it."
+  (mapcar (lambda (entry)
+            (let* ((name (car entry))
+                   (info (cdr entry))
+                   (lang (nth 0 info))
+                   (params (nth 2 info))
+                   (filtered (seq-filter (lambda (p)
+                                           (memq (car p) '(:var)))
+                                         params)))
+              (list name lang filtered)))
+          (seq-filter (lambda (entry)
+                        (or (null regexp)
+                            (string-match-p regexp (symbol-name (car entry)))))
+                      org-babel-library-of-babel)))
 
 (provide 'devops-lob)
 
