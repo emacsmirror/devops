@@ -49,14 +49,16 @@
 ;; Commands, on the heading at point:
 ;;
 ;; - `devops-tangle'             tangle the heading's blocks to its target
+;; - `devops-visit-file'         open tangled source block in the target
+;; - `devops-open-terminal-dwim' open a terminal at the target
+;; 
+;; If async is enabled (recommended)
 ;; - `devops-goto-session'       show the target's shell session
 ;; - `devops-restart-session'    kill the target's sessions
-;; - `devops-open-terminal-dwim' open a terminal at the target
 ;;
 ;; Options:
 ;;
-;; - `devops-enable-session-async'  run blocks in async sessions,
-;;   a pool of `devops-session-pool-size' per target
+;; - `devops-enable-session-async'  run blocks in async session pool
 ;; - `devops-execution-log'         log each block run to a JSON file
 ;;
 ;; The other files are separate features, each loaded on first use:
