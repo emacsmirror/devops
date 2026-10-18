@@ -25,11 +25,7 @@
 
 ;;; Commentary:
 ;;
-;; Run org-babel blocks on remote machines, chosen by heading tag.
-;;
-;; A `#+TARGET' keyword maps a tag to a TRAMP prefix.
-;; With `devops-mode' on, blocks under a heading with that tag
-;; pick up the prefix as :dir.
+;; `devops.el' adds TARGET syntax to org-babel:
 ;;
 ;;   #+TARGET: /ssh:web1.example.com: (web)
 ;;   #+TARGET: /ssh:db1.example.com: (db)
@@ -41,17 +37,27 @@
 ;;
 ;;   #+RESULTS:
 ;;   : web1
+;; 
+;; The package provides features that can be loaded separately:
 ;;
-;; Setup:
+;; (require 'devops)
+;;   Run and tangle org-babel blocks on remote machines, chosen by
+;;   heading tag.  Main entrypoint is `devops-mode'.
 ;;
-;;   (devops-mode 1)
+;; (require 'devops-drift)
+;;   Detect drift between tangled blocks and the files on each
+;;   target.  Main entrypoint is `devops-drift'.
+;; 
+;; (require 'devops-lob)
+;;   Per-project Library of Babel from a project's tools.org.  Main
+;;   entrypoint is `devops-lob-mode'.
 ;;
 ;; Commands, on the heading at point:
 ;;
 ;; - `devops-tangle'             tangle the heading's blocks to its target
 ;; - `devops-visit-file'         open tangled source block in the target
 ;; - `devops-open-terminal-dwim' open a terminal at the target
-;; 
+;;
 ;; If async is enabled (recommended)
 ;; - `devops-goto-session'       show the target's shell session
 ;; - `devops-restart-session'    kill the target's sessions
@@ -59,12 +65,6 @@
 ;; Options:
 ;;
 ;; - `devops-enable-session-async'  run blocks in async session pool
-;;
-;; The other files are separate features, each loaded on first use:
-;;
-;; - devops-drift.el      `devops-drift' compares tangled files with
-;;                        what is on each target
-;; - devops-lob.el        `devops-lob-mode' loads a project's tools.org
 
 ;;; Code:
 
@@ -473,11 +473,6 @@ list of (TAG TARGET N), N the number of files tangled to TARGET, as
 file, as `devops-drift-all' returns it.  They run in the command's
 buffer, with point where it ran.  After an ERROR the command signals it
 again.")
-
-;; Also autoloaded by their cookies, but only when installed as a
-;; package: not with a bare `:load-path'.
-(autoload 'devops-lob-mode "devops-lob" nil t)
-(autoload 'devops-drift "devops-drift" nil t)
 
 (defun devops--run-command (event all fn &optional public)
   "Call FN, the work of command EVENT, then `devops-command-functions'.

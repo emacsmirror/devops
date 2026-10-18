@@ -35,7 +35,9 @@ Enable optional features:
   (devops-enable-session-async t)    ; async sessions (recommended), see below
   :config
   (devops-mode 1)
-  (devops-lob-mode 1))                ; load a project's tools.org
+  (require 'devops-lob)               ; load a project's tools.org
+  (devops-lob-mode 1)
+  (require 'devops-drift))            ; M-x devops-drift
 ```
 
 ## Why?
