@@ -590,7 +590,7 @@ LINK is the `:comments link' target org stored for a block."
     link))
 
 (defun devops--redirect-tangle-plan (plan)
-  "Send each block in PLAN where `devops--tangle-redirect' says.
+  "Send each block in PLAN to the file chosen by `devops--tangle-redirect'.
 PLAN is what `org-babel-tangle-collect-blocks' returns: a list of
 \(FILE (LANG . SPEC) ...) that `org-babel-tangle' then writes out, one
 FILE at a time.
@@ -907,7 +907,7 @@ In a src block, if the : copies body to clipboard and exports :var env vars."
     (devops--open-terminal-at-dir dir env-vars)))
 
 (defun devops-unload-function ()
-  "Turn `devops-mode' off, so `unload-feature' leaves no advice behind.
+  "Turn `devops-mode' off, removing its advice before unloading.
 Return nil, so the rest of the unloading proceeds as usual."
   (devops-mode -1)
   nil)
