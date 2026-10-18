@@ -27,9 +27,9 @@
 ;;
 ;; Run org-babel blocks on remote machines, chosen by heading tag.
 ;;
-;; A `#+TARGET' keyword maps a tag to a TRAMP prefix (or a local
-;; directory).  With `devops-mode' on, a block under a heading with that
-;; tag runs there, and `devops-tangle' writes its files there:
+;; A `#+TARGET' keyword maps a tag to a TRAMP prefix.
+;; With `devops-mode' on, blocks under a heading with that tag
+;; pick up the prefix as :dir.
 ;;
 ;;   #+TARGET: /ssh:web1.example.com: (web)
 ;;   #+TARGET: /ssh:db1.example.com: (db)
@@ -59,16 +59,12 @@
 ;; Options:
 ;;
 ;; - `devops-enable-session-async'  run blocks in async session pool
-;; - `devops-execution-log'         log each block run to a JSON file
 ;;
 ;; The other files are separate features, each loaded on first use:
 ;;
 ;; - devops-drift.el      `devops-drift' compares tangled files with
 ;;                        what is on each target
-;; - devops-lob.el        `devops-lob-mode' makes a project's tools.org
-;;                        callable from its org files
-;; - devops-scripting.el  functions for scripts over emacsclient
-;; - devops-log.el        writes `devops-execution-log'
+;; - devops-lob.el        `devops-lob-mode' loads a project's tools.org
 
 ;;; Code:
 
@@ -129,6 +125,13 @@ Bound by `devops-with-sync' around tangling and drift checks.")
   (declare (indent 0) (debug t))
   `(let ((devops--inhibit-async t))
      ,@body))
+
+(defun devops-user-run-p ()
+  "Non-nil if the src block being executed is the user's run.
+Nil for the runs devops.el makes itself, under `devops-with-sync': a
+reference, a dynamic target, tangling, a drift check.  Meaningful in
+`org-babel-after-execute-hook'."
+  (not devops--inhibit-async))
 
 ;; Maybe it would make sense to follow the #+LINK syntax?
 ;; #+TARGET: server /ssh:example1.com:
@@ -193,9 +196,10 @@ value."
         (devops--target-from-ref tag ref)
       target)))
 
-(defun devops--heading-target-tags ()
+(defun devops-heading-targets ()
   "Return list of (TAG . TARGET) for all matching tags on current heading.
-Searches heading's tags against all #+TARGET keywords."
+Searches heading's tags against all #+TARGET keywords.  Never prompts;
+`devops--heading-target' is the one that asks the user to choose."
   (let ((tags (org-get-tags nil nil)))
     (delq nil
           (mapcar (lambda (tag)
@@ -207,7 +211,7 @@ Searches heading's tags against all #+TARGET keywords."
   "Return the (TAG . TARGET) in effect for the current heading, or nil.
 If more than one of the heading's tags names a target, use
 `completing-read', allowing the user to select one."
-  (let ((matches (devops--heading-target-tags)))
+  (let ((matches (devops-heading-targets)))
     (cond
      ((null matches)
       nil)
@@ -319,6 +323,13 @@ or give the block its own :session"
                       (buffer-list))
           (lambda (a b) (string-version-lessp (buffer-name a) (buffer-name b))))))
 
+(defun devops-target-sessions (target)
+  "Return the names of the sessions a block on TARGET may have run in.
+The live sessions in TARGET's pool, by slot; with none live, the name
+the first would have.  Nothing is started."
+  (or (mapcar #'buffer-name (devops--pool-buffers target))
+      (list (devops--session-name target))))
+
 (defun devops--user-header-args (lang)
   "Return the header arguments written on the src block at point.
 Org's defaults, global and for language LANG, are left out."
@@ -384,8 +395,9 @@ Bound by `devops--execute-on-target' for the run, so that
 `org-babel-after-execute-hook' knows where the block ran.  Resolving
 the target there again would run a dynamic target's block again.")
 
-(defvar devops--block-session nil
+(defvar devops-block-session nil
   "The name of the session the src block being executed was sent to.
+For `org-babel-after-execute-hook', and for a package that logs runs.
 Bound by `devops--execute-on-target' for the run, alongside
 `devops--block-target': a pool has several sessions, and only the
 injected header says which one the block got.  For a block run with no
@@ -432,10 +444,10 @@ is the target, and :session and :async are injected as decision 2 says."
   "Advise `org-babel-execute-src-block' (FN with ARGS) to run on the target.
 The heading's #+TARGET is resolved once, injected by
 `devops--inject-header-args', and bound to `devops--block-target' for
-the run, with the session it gets bound to `devops--block-session'."
+the run, with the session it gets bound to `devops-block-session'."
   (let* ((devops--block-target (devops--execution-target args))
          (args (devops--inject-header-args args devops--block-target))
-         (devops--block-session
+         (devops-block-session
           (when-let* ((pair devops--block-target))
             (let ((session (cdr (assq :session (nth 2 args)))))
               (if (and session (not (equal session "none")))
@@ -449,109 +461,44 @@ the run, with the session it gets bound to `devops--block-session'."
     (apply fn args)))
 
 
-;;; Execution log
-;;
-;; `devops-mode' always installs the logging hooks.  They check
-;; `devops-execution-log' each time they run, so setting it takes effect
-;; with the mode already on, and devops-log.el loads only once it is set.
+;;; Command hook
 
-(defcustom devops-execution-log nil
-  "File to append a JSON line to per user action, or nil for none.
-An agent can follow the file with `tail -F' and learn what the user did
-without being told.  A line is written when a block runs, for an async
-block again when its result arrives, and when `devops-tangle' or
-`devops-drift' runs.  Each has `event' (\"execute\", \"result\",
-\"tangle\" or \"drift\"), `time', `file' and `buffer'; see
-devops-log.el for the rest.  No line holds output: the agent reads it
-with `devops-scripting-block-output'.  Takes effect while `devops-mode'
-is on."
-  :type '(choice (const :tag "Off" nil) file)
-  :group 'devops)
+(defvar devops-command-functions nil
+  "Functions called after `devops-tangle' or `devops-drift' runs.
+Each is called with EVENT, \"tangle\" or \"drift\"; ALL, the command's
+prefix argument; VALUE, what it computed; and ERROR, the error it
+signaled, or nil.  VALUE is nil after an error.  For \"tangle\" it is a
+list of (TAG TARGET N), N the number of files tangled to TARGET, as
+`devops-tangle-headline' returns it.  For \"drift\" it is one alist per
+file, as `devops-drift-all' returns it.  They run in the command's
+buffer, with point where it ran.  After an ERROR the command signals it
+again.")
 
-(autoload 'devops-log-block "devops-log")
-(autoload 'devops-log-command "devops-log")
+;; Also autoloaded by their cookies, but only when installed as a
+;; package: not with a bare `:load-path'.
+(autoload 'devops-lob-mode "devops-lob" nil t)
+(autoload 'devops-drift "devops-drift" nil t)
 
-(defun devops--log (event pos session &optional id)
-  "Log EVENT on the src block at POS, run in SESSION, to the log.
-SESSION is the session buffer's name, or nil for a block that ran on
-no target.  ID, when known, is the run's ID, and is logged as it is
-instead of being looked up from the block.  Scripted evaluation -- a
-reference, a dynamic target, tangling -- runs blocks under
-`devops-with-sync', and those runs are not the user's, so they are not
-logged."
-  (when (and devops-execution-log (not devops--inhibit-async))
-    (devops-log-block event pos session id)))
-
-(defvar devops-mode)
-
-(defun devops--logged (event all fn fields)
-  "Call FN, and log EVENT with FIELDS of its value, or with its error.
-For a command the user runs, such as `devops-tangle'.  ALL is the
-command's prefix argument, as `devops-log-command' takes it.  FIELDS is
-a function of FN's value that returns an alist.  Return FN's value."
-  (if (not (and devops-mode devops-execution-log))
+(defun devops--run-command (event all fn &optional public)
+  "Call FN, the work of command EVENT, then `devops-command-functions'.
+ALL is the command's prefix argument.  PUBLIC, when given, turns FN's
+value into the VALUE the functions get, and is called only when there
+are any.  Return FN's value."
+  (if (not devops-command-functions)
       (funcall fn)
     (let ((value (condition-case err
                      (save-excursion (funcall fn))
                    (error
-                    (devops-log-command
-                     event all `((:error . ,(error-message-string err))))
+                    (run-hook-with-args 'devops-command-functions
+                                        event all nil err)
                     (signal (car err) (cdr err))))))
-      (devops-log-command event all (funcall fields value))
+      (run-hook-with-args 'devops-command-functions event all
+                          (if public (funcall public value) value) nil)
       value)))
-
-(defun devops--log-execution ()
-  "Log the src block just executed, for `org-babel-after-execute-hook'.
-An async block has only started: its status is `:running', and its
-result is logged again by `devops--log-async-result'."
-  (when org-babel-current-src-block-location
-    (devops--log "execute" org-babel-current-src-block-location
-                 devops--block-session)))
-
-(defvar devops--async-result nil
-  "The session's name while ob-comint inserts the result of an async run.
-Bound by `devops--during-async-filter', so that
-`devops--log-async-result' logs only that insertion, not every result
-a block inserts, and names the session without resolving the target.")
-
-(defun devops--during-async-filter (fn &rest args)
-  "Run FN, `org-babel-comint-async-filter', with ARGS, logging results.
-ob-comint runs no hook when an async result arrives; it calls
-`org-babel-insert-result' from this filter, with point on the block."
-  (let ((devops--async-result (buffer-name)))
-    (apply fn args)))
-
-(defun devops--log-async-result (fn &rest args)
-  "Run FN, `org-babel-insert-result', with ARGS; log an async result.
-Point is on the block before FN runs, which may move it.  The block's
-#+RESULTS still holds the run's ID then, and the output that replaces
-it may print the ID of any other run, so the ID is read before FN."
-  (let* ((pos (point))
-         (session devops--async-result)
-         (id (and session devops-execution-log
-                  (devops--placeholder-id-at pos))))
-    (prog1 (apply fn args)
-      (when session
-        (let ((devops--async-result nil))
-          (devops--log "result" pos session id))))))
-
-(declare-function devops-scripting--src-block-at "devops-scripting")
-(declare-function devops-scripting--results-text "devops-scripting")
-(declare-function devops-scripting--placeholder-id "devops-scripting")
-
-(defun devops--placeholder-id-at (pos)
-  "Return the run ID in #+RESULTS of the src block at POS, or nil.
-Nil when the result is no longer the placeholder, or POS is no block."
-  (require 'devops-scripting)
-  (ignore-errors
-    (save-excursion
-      (devops-scripting--src-block-at (line-number-at-pos pos))
-      (devops-scripting--placeholder-id (devops-scripting--results-text)))))
 
 ;;;###autoload
 (define-minor-mode devops-mode
-  "Make org-babel blocks run on their heading's #+TARGET.
-Also writes `devops-execution-log' when that is set."
+  "Make org-babel blocks run on their heading's #+TARGET."
   :global t
   :group 'devops
   (if devops-mode
@@ -559,18 +506,9 @@ Also writes `devops-execution-log' when that is set."
         (advice-add 'org-babel-execute-src-block :around
                     #'devops--execute-on-target)
         (advice-add 'org-babel-ref-resolve :around
-                    #'devops--resolve-ref-sync)
-        (add-hook 'org-babel-after-execute-hook #'devops--log-execution)
-        (advice-add 'org-babel-comint-async-filter :around
-                    #'devops--during-async-filter)
-        (advice-add 'org-babel-insert-result :around
-                    #'devops--log-async-result))
+                    #'devops--resolve-ref-sync))
     (advice-remove 'org-babel-execute-src-block #'devops--execute-on-target)
-    (advice-remove 'org-babel-ref-resolve #'devops--resolve-ref-sync)
-    (remove-hook 'org-babel-after-execute-hook #'devops--log-execution)
-    (advice-remove 'org-babel-comint-async-filter
-                   #'devops--during-async-filter)
-    (advice-remove 'org-babel-insert-result #'devops--log-async-result)))
+    (advice-remove 'org-babel-ref-resolve #'devops--resolve-ref-sync)))
 
 (defun devops--heading-sessions ()
   "Return (NAME . BUFFERS) for the current heading's target.
@@ -752,13 +690,13 @@ With prefix ARG non-nil, include all target-tagged headings."
                                                    (org-get-tags)))))
                            (seq-remove (lambda (pair)
                                          (member (car pair) parent-tags))
-                                       (devops--heading-target-tags))))
+                                       (devops-heading-targets))))
              (push (list :tag (car pair)
                          :target (cdr pair)
                          :heading-pos (point))
                    specs))))
         (nreverse specs))
-    (let ((pairs (devops--heading-target-tags)))
+    (let ((pairs (devops-heading-targets)))
       (unless pairs
         (user-error "No #+TARGET match for tags on current heading"))
       (let ((pos (save-excursion (org-back-to-heading t) (point))))
@@ -810,19 +748,11 @@ target tags."
   (interactive "P")
   (message "%s"
            (devops--tangle-report
-            (devops--logged
+            (devops--run-command
              "tangle" arg
              (lambda ()
                (devops--tangle-spec-execute
-                (current-buffer) (devops--tangle-spec arg)))
-             (lambda (results)
-               `((:targets
-                  . ,(vconcat
-                      (mapcar (lambda (r)
-                                `((:tag . ,(nth 0 r))
-                                  (:target . ,(nth 1 r))
-                                  (:files . ,(nth 2 r))))
-                              results)))))))))
+                (current-buffer) (devops--tangle-spec arg)))))))
 
 (defun devops-tangle-headline (source-buf headline)
   "Tangle the subtree titled HEADLINE in SOURCE-BUF, noninteractively.
