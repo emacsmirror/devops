@@ -33,8 +33,6 @@ Enable optional features:
   :ensure t
   :custom
   (devops-enable-session-async t)    ; async sessions (recommended), see below
-  (devops-execution-log              ; log runs, tangles, drift checks
-   "~/.cache/devops/executions.jsonl")
   :config
   (devops-mode 1)
   (devops-lob-mode 1))                ; load a project's tools.org
@@ -377,31 +375,3 @@ Turn on `devops-lob-mode`, and opening any file in a project that has `tools.org
 | `devops-lob-unload-all`           | Remove all devops-tracked LOB entries             |
 | `devops-lob-tool-blocks`          | List loaded entries (name, language, `:var`s)     |
 
-## Scripting and Agents
-
-`devops-scripting.el` is for noninteractive use, usually through 
-`emacsclient --eval`.
-
-```
-emacsclient --eval '(progn (require (quote devops-scripting)) ...)'
-```
-
-This is great for automation, and also for agents. The basic idea is this:
-
-1. An agent writes source code blocks to a file.
-2. You execute those source blocks.
-3. The agent gets notified by tailing the execution log.
-  - If there are no errors, agent continues advising
-  - If there are errors, agent helps fix them and print new source code blocks.
-4. Repeat.
-
-This way you are in control of what to execute, and the agent is limited
-to a supporting / advisory role.
-
-To enable this kind of loop, set `devops-execution-log` to a file and point your agent
-to the `devops-el` skill in `skills/`. For Claude Code, link it into your
-skills directory:
-
-```
-ln -s "$PWD/skills/devops-el" ~/.claude/skills/devops-el
-```
